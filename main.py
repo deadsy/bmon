@@ -1,74 +1,88 @@
+#------------------------------------------------------------------------------
+"""
+bmon - Beehive Monitoring
+"""
+#------------------------------------------------------------------------------
 
+import time
 import ubinascii
 import machine
-import time
+import network
 
 from umqtt import MQTTClient
 import cfg
 
-version = "1.0"
-client_id = ubinascii.hexlify(machine.unique_id())
-topic_sub = b'notification'
-topic_pub = b'hello'
+#------------------------------------------------------------------------------
 
-def wlan_connect():
-  import network
+bmon_version = "0.1"
+
+#------------------------------------------------------------------------------
+
+def wlan_connect(essid, passphrase):
+  """connect to wlan network"""
   sta_if = network.WLAN(network.STA_IF)
   if not sta_if.isconnected():
     print('connecting to network...')
     sta_if.active(True)
-    sta_if.connect(cfg.wlan_essid, cfg.wlan_passphrase)
+    sta_if.connect(essid, passphrase)
     while not sta_if.isconnected():
       pass
-  print('network config:', sta_if.ifconfig())
+  print("network: ip %s subnet %s gateway %s dns %s" % sta_if.ifconfig())
 
-def sub_cb(topic, msg):
+#------------------------------------------------------------------------------
+
+def mqtt_subscription_cb(topic, msg):
+  """mqtt subscription message callback"""
   print((topic, msg))
-  if topic == b'notification' and msg == b'received':
-    print("received hello message")
 
-def connect_and_subscribe():
-  global client_id, topic_sub
-  client = MQTTClient(client_id, cfg.mqtt_server)
-  client.set_callback(sub_cb)
+def mqtt_connect(client_id, mqtt_server):
+  """connect to an mqtt broker"""
+  client = MQTTClient(client_id, mqtt_server)
+  client.set_callback(mqtt_subscription_cb)
   client.connect()
-  client.subscribe(topic_sub)
-  print('connected to %s MQTT broker, subscribed to %s topic' % (cfg.mqtt_server, topic_sub))
+  print("connected to mqtt broker %s" % mqtt_server)
   return client
 
+#------------------------------------------------------------------------------
 
-def restart_and_reconnect():
-  print("failed to connect to MQTT broker, restarting")
-  time.sleep(2)
+def restart():
+  """restart the device"""
+  print("restarting...")
+  time.sleep(10)
   machine.reset()
 
+#------------------------------------------------------------------------------
+
 def main():
+  """entry point"""
+  print("bmon version %s" % bmon_version)
 
-  global version, topic_pub
+  # connect to wlan
+  wlan_connect(cfg.wlan_essid, cfg.wlan_passphrase)
 
-  print("bmon version %s" % version)
-
-  wlan_connect()
-
+  # connect to the mqtt broker
+  client_id = ubinascii.hexlify(machine.unique_id())
   try:
-    client = connect_and_subscribe()
-  except OSError as e:
-    restart_and_reconnect()
+    client = mqtt_connect(client_id, cfg.mqtt_server)
+    client.subscribe("notification")
+  except OSError:
+    restart()
 
+  # publish periodic mqtt messages
   last_message = 0
   message_interval = 5
   counter = 0
-
   while True:
     try:
       client.check_msg()
       if (time.time() - last_message) > message_interval:
         msg = b'Hello #%d' % counter
-        client.publish(topic_pub, msg)
+        client.publish("stats", msg)
         last_message = time.time()
         counter += 1
-    except OSError as e:
-      restart_and_reconnect()
-
+    except OSError:
+      restart()
 
 main()
+
+#------------------------------------------------------------------------------

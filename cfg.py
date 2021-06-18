@@ -1,4 +1,6 @@
-# bmon config
+"""
+bmon config
+"""
 
 # wlan
 wlan_essid = "MinnieBannister-BG"
